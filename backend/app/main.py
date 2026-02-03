@@ -1,11 +1,27 @@
 from app.schemas import SubmissionOut, ApproveSubmissionIn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional, List
 from app.database import get_connection
 import json
+from fastapi import UploadFile, File
+from app.ocr.handwriting import handwriting_ocr
+
 
 app = FastAPI(title="Invoice OCR Prototype API")
+
+# CORS: allow the Vite dev server to call the API during local development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class SubmissionCreate(BaseModel):
@@ -44,7 +60,7 @@ def create_submission(payload: SubmissionCreate):
         cur.close()
         conn.close()
 
-        return row
+        return dict(row) if isinstance(row, dict) else row
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database insert failed: {str(e)}")
@@ -72,7 +88,7 @@ def get_submission(submission_id: str):
         if not row:
             raise HTTPException(status_code=404, detail="Submission not found")
 
-        return row
+        return dict(row) if isinstance(row, dict) else row
 
     except HTTPException:
         raise
@@ -169,3 +185,55 @@ def approve_submission(submission_id: str, payload: ApproveSubmissionIn):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+# @app.post("/ocr/handwriting")
+# async def ocr_handwriting(file: UploadFile = File(...)):
+#     data = await file.read()
+#     text = handwriting_ocr(data)
+#     return {"text": text}
+
+@app.post("/submissions/upload", response_model=SubmissionOut)
+async def upload_submission(file: UploadFile = File(...)):
+    """
+    Upload an invoice image (prototype: key fields handwritten),
+    run handwriting OCR, store results in extracted_data, status=pending_review.
+    """
+    try:
+        image_bytes = await file.read()
+
+        # 1) OCR (handwriting)
+        raw_text = handwriting_ocr(image_bytes)
+
+        # 2) Build extracted_data payload (prototype-friendly + traceable)
+        extracted_data = {
+            "ocr": {
+                "raw_text": raw_text,
+                "engine": "microsoft/trocr-base-handwritten",
+                "scope": "key_fields",
+            }
+        }
+
+        # 3) Store submission (image_url is placeholder for now)
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO submissions (image_url, extracted_data, status)
+            VALUES (%s, %s::jsonb, %s)
+            RETURNING id, image_url, extracted_data, status, created_at;
+            """,
+            ("uploaded_file", json.dumps(extracted_data), "pending_review"),
+        )
+
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return dict(row) if isinstance(row, dict) else row
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
