@@ -19,6 +19,8 @@ export default function App() {
 
   const [loadingQueue, setLoadingQueue] = useState(false);
   const [queue, setQueue] = useState([]);
+  const [loadingApproved, setLoadingApproved] = useState(false);
+  const [approved, setApproved] = useState([]);
 
   const [selected, setSelected] = useState(null);
   const [approving, setApproving] = useState(false);
@@ -44,6 +46,21 @@ export default function App() {
       setError(e.message || "Failed to load queue");
     } finally {
       setLoadingQueue(false);
+    }
+  }
+
+  async function fetchApproved() {
+    setLoadingApproved(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/submissions?status=approved`);
+      if (!res.ok) throw new Error(`Approved fetch failed (${res.status})`);
+      const data = await res.json();
+      setApproved(data);
+    } catch (e) {
+      setError(e.message || "Failed to load approved submissions");
+    } finally {
+      setLoadingApproved(false);
     }
   }
 
@@ -114,11 +131,14 @@ export default function App() {
         ],
       };
 
-      const res = await fetch(`${API_BASE}/submissions/${selected.id}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch(
+        `${API_BASE}/submissions/${selected.id}/approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
 
       if (!res.ok) {
         const text = await res.text();
@@ -132,6 +152,7 @@ export default function App() {
       setItemConf(0.8);
 
       await fetchQueue();
+      await fetchApproved();
     } catch (e) {
       setError(e.message || "Approve failed");
     } finally {
@@ -141,16 +162,52 @@ export default function App() {
 
   useEffect(() => {
     fetchQueue();
+    fetchApproved();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>Invoice OCR — HITL</h1>
-        <p>
-          Upload → OCR baseline → store as <strong>pending_review</strong> → approve with corrected items.
-        </p>
+      <header className="topbar">
+        <div className="brand">
+          <h1 className="brand__title">Invoice OCR — HITL</h1>
+          <p className="brand__subtitle">
+            Upload → OCR baseline → store as <strong>pending_review</strong> →
+            approve with corrected items.
+          </p>
+
+          <div className="pillrow">
+            <span className="pill">
+              <span className="pill__dot" />
+              OCR: baseline
+            </span>
+            <span className="pill">
+              <span className="pill__dot" />
+              Workflow: HITL
+            </span>
+            <span className="pill">
+              <span className="pill__dot" />
+              DB: Supabase Postgres
+            </span>
+          </div>
+        </div>
+
+        <div className="topbar__meta">
+          <div className="kpi">
+            <div className="kpi__card">
+              <p className="kpi__label">Queue</p>
+              <p className="kpi__value">{queue?.length || 0}</p>
+            </div>
+            <div className="kpi__card">
+              <p className="kpi__label">Selected</p>
+              <p className="kpi__value">{selected?.id ? "Yes" : "No"}</p>
+            </div>
+            <div className="kpi__card">
+              <p className="kpi__label">Approved</p>
+              <p className="kpi__value">{approved?.length || 0}</p>
+            </div>
+          </div>
+        </div>
       </header>
 
       {error ? (
@@ -159,40 +216,44 @@ export default function App() {
         </div>
       ) : null}
 
-      <div className="cards">
+      <div className="layout">
         <section className="card">
           <h2 className="card__title">1) Upload Invoice</h2>
 
-          <form className="upload-form" onSubmit={handleUpload}>
-            <div className="file-wrap">
+          <form className="uploadForm" onSubmit={handleUpload}>
+            <div className="fileRow">
               <input
                 type="file"
-                className="file-input"
+                className="fileInput"
                 accept="image/jpeg,image/png,image/heic,image/heif"
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
                 aria-label="Choose invoice image"
               />
-              <button type="submit" className="btn btn--primary" disabled={uploading}>
+              <button
+                type="submit"
+                className="btn btn--primary"
+                disabled={uploading}
+              >
                 {uploading ? "Uploading…" : "Upload"}
               </button>
             </div>
           </form>
 
           {uploadResult ? (
-            <div className="upload-result">
-              <div className="upload-result__row">
-                <span className="upload-result__label">Submission ID</span>
+            <div className="result">
+              <div className="result__row">
+                <span className="result__label">Submission ID</span>
                 <span>{uploadResult.id}</span>
               </div>
-              <div className="upload-result__row">
-                <span className="upload-result__label">Status</span>
+              <div className="result__row">
+                <span className="result__label">Status</span>
                 <span>{uploadResult.status}</span>
               </div>
-              <div className="upload-result__row">
-                <span className="upload-result__label">Created</span>
+              <div className="result__row">
+                <span className="result__label">Created</span>
                 <span>{formatDt(uploadResult.created_at)}</span>
               </div>
-              <div className="upload-result__ocr" title="OCR raw text">
+              <div className="ocrbox" title="OCR raw text">
                 {uploadResult?.extracted_data?.ocr?.raw_text || "(none)"}
               </div>
             </div>
@@ -218,12 +279,16 @@ export default function App() {
                 <button
                   key={s.id}
                   type="button"
-                  className={`queue-item ${selected?.id === s.id ? "queue-item--selected" : ""}`}
+                  className={`queue-item ${
+                    selected?.id === s.id ? "queue-item--selected" : ""
+                  }`}
                   onClick={() => fetchSubmission(s.id)}
                 >
                   <div className="queue-item__head">
                     <span className="queue-item__id">{s.id}</span>
-                    <span className="queue-item__date">{formatDt(s.created_at)}</span>
+                    <span className="queue-item__date">
+                      {formatDt(s.created_at)}
+                    </span>
                   </div>
                   <div className="queue-item__preview">
                     {s?.extracted_data?.ocr?.raw_text
@@ -242,7 +307,7 @@ export default function App() {
         </section>
       </div>
 
-      <section className="review-section">
+      <section className="review">
         <h2 className="card__title">3) Review & Approve</h2>
 
         {!selected ? (
@@ -250,32 +315,34 @@ export default function App() {
             Select a submission from the queue to review.
           </div>
         ) : (
-          <div className="review-grid">
+          <div className="reviewGrid">
             <div>
-              <div className="review-meta">
-                <div className="review-meta__row">
-                  <span className="review-meta__label">Submission</span>
+              <div className="meta">
+                <div className="metaRow">
+                  <span className="metaKey">Submission</span>
                   <span>{selected.id}</span>
                 </div>
-                <div className="review-meta__row">
-                  <span className="review-meta__label">Status</span>
+                <div className="metaRow">
+                  <span className="metaKey">Status</span>
                   <span>{selected.status}</span>
                 </div>
-                <div className="review-meta__row">
-                  <span className="review-meta__label">Created</span>
+                <div className="metaRow">
+                  <span className="metaKey">Created</span>
                   <span>{formatDt(selected.created_at)}</span>
                 </div>
               </div>
               <div className="review-ocr-box">
                 <span className="review-ocr-box__label">OCR raw text</span>
-                <div className="review-ocr-box__content">{selectedRawText || "(none)"}</div>
+                <div className="review-ocr-box__content">
+                  {selectedRawText || "(none)"}
+                </div>
               </div>
             </div>
 
-            <div className="approve-form">
+            <div className="form">
               <p className="approve-form__title">Approve (single line item)</p>
-              <div className="approve-form__fields">
-                <div className="form-group">
+              <div className="formGrid">
+                <div className="field">
                   <label htmlFor="item-desc">Description</label>
                   <input
                     id="item-desc"
@@ -283,7 +350,7 @@ export default function App() {
                     onChange={(e) => setItemDesc(e.target.value)}
                   />
                 </div>
-                <div className="form-group">
+                <div className="field">
                   <label htmlFor="item-qty">Quantity</label>
                   <input
                     id="item-qty"
@@ -292,7 +359,7 @@ export default function App() {
                     onChange={(e) => setItemQty(e.target.value)}
                   />
                 </div>
-                <div className="form-group">
+                <div className="field">
                   <label htmlFor="item-amount">Amount</label>
                   <input
                     id="item-amount"
@@ -302,7 +369,7 @@ export default function App() {
                     onChange={(e) => setItemAmount(e.target.value)}
                   />
                 </div>
-                <div className="form-group">
+                <div className="field">
                   <label htmlFor="item-conf">Confidence (0–1)</label>
                   <input
                     id="item-conf"
@@ -328,8 +395,48 @@ export default function App() {
         )}
       </section>
 
-      <p className="footer-note">
-        Prototype note: HEIC is supported after adding server-side conversion (pillow-heif). Current demo focuses on JPEG/PNG uploads.
+      <section className="approved">
+        <h2 className="card__title">4) Approved Submissions</h2>
+        <div className="queue-actions">
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={fetchApproved}
+            disabled={loadingApproved}
+          >
+            {loadingApproved ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
+
+        <div className="queue-list">
+          {approved?.length ? (
+            approved.map((s) => (
+              <div key={s.id} className="queue-item approved-item">
+                <div className="queue-item__head">
+                  <span className="queue-item__id">{s.id}</span>
+                  <span className="queue-item__date">
+                    {formatDt(s.created_at)}
+                  </span>
+                </div>
+                <div className="queue-item__preview">
+                  {s?.extracted_data?.ocr?.raw_text
+                    ? s.extracted_data.ocr.raw_text.slice(0, 120) +
+                      (s.extracted_data.ocr.raw_text.length > 120 ? "…" : "")
+                    : "(no OCR yet)"}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="queue-empty">
+              {loadingApproved ? "Loading…" : "No approved submissions yet."}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <p className="footer">
+        Prototype note: HEIC is supported after adding server-side conversion
+        (pillow-heif). Current demo focuses on JPEG/PNG uploads.
       </p>
     </div>
   );

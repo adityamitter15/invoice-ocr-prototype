@@ -3,3 +3,11 @@ node_modules/
 __pycache__/
 .DS_Store
 venv/
+*.zip
+startup.txt
+backend/.env
+frontend/.env
+backend/local.db
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3

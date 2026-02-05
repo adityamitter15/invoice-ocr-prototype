@@ -1,68 +1,42 @@
-/* Design system & base styles */
 :root {
-  --font-sans: "DM Sans", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  --color-bg: #f1f5f9;
-  --color-surface: #ffffff;
-  --color-border: #e2e8f0;
-  --color-border-hover: #cbd5e1;
-  --color-text: #0f172a;
-  --color-text-muted: #64748b;
-  --color-text-subtle: #94a3b8;
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
-  --color-primary-muted: #dbeafe;
-  --color-success: #059669;
-  --color-success-muted: #d1fae5;
-  --color-error: #dc2626;
-  --color-error-muted: #fee2e2;
-  --color-error-border: #fecaca;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
-  --space-xs: 6px;
-  --space-sm: 10px;
-  --space-md: 14px;
-  --space-lg: 20px;
-  --space-xl: 28px;
+  --text: #0f172a;
+  --muted: rgba(15, 23, 42, 0.72);
+  --subtle: rgba(15, 23, 42, 0.52);
+  --border: rgba(15, 23, 42, 0.14);
+  --surface: rgba(255, 255, 255, 0.76);
+  --surface-strong: rgba(255, 255, 255, 0.94);
+  --accent: #0f766e;
+  --accent-2: #1d4ed8;
+  --accent-soft: rgba(15, 118, 110, 0.16);
+  --shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  --shadow-strong: 0 22px 60px rgba(15, 23, 42, 0.12);
+  --ring: rgba(15, 118, 110, 0.22);
 }
 
 *,
 *::before,
-*::after {
-  box-sizing: border-box;
-}
+*::after { box-sizing: border-box; }
 
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: var(--font-sans);
-  font-size: 15px;
+  color: var(--text);
+  font-family: "Sora", "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
   line-height: 1.5;
-  color: var(--color-text);
-  background: var(--color-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  background:
+    radial-gradient(1100px 600px at 10% 0%, rgba(14, 116, 144, 0.18), transparent 60%),
+    radial-gradient(900px 600px at 90% 10%, rgba(249, 115, 22, 0.12), transparent 60%),
+    radial-gradient(1000px 700px at 50% 100%, rgba(16, 185, 129, 0.14), transparent 60%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
 }
 
 #root {
   min-height: 100vh;
-  padding: var(--space-xl) var(--space-lg);
+  padding: 28px 18px;
 }
 
-button {
-  font-family: inherit;
-  font-size: inherit;
-  cursor: pointer;
-}
-
-input,
-textarea {
-  font-family: inherit;
-  font-size: inherit;
-}
-
-input[type="file"] {
-  cursor: pointer;
-}
+button { font-family: inherit; }
+input, textarea { font-family: inherit; }
