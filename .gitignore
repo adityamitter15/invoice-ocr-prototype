@@ -27,18 +27,6 @@ backend/local.db.bak
 .vscode/
 .idea/
 
-# LaTeX build artefacts
-*.aux
-*.toc
-*.lof
-*.lot
-*.out
-*.synctex.gz
-*.fls
-*.fdb_latexmk
-texput.log
-backend/FYP_Report.*
-
 # Fine-tuning runs + model cache
 backend/runs/
 backend/debug_cells/
