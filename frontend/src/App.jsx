@@ -1,443 +1,90 @@
-import { useEffect, useMemo, useState } from "react";
-import "./App.css";
+import { useState, useEffect, useCallback } from "react";
+import { useAuth } from "./auth.jsx";
+import Login from "./Login.jsx";
+import ChangePasswordModal from "./ChangePasswordModal.jsx";
+import ResetPasswordView from "./ResetPasswordView.jsx";
+import Sidebar from "./components/Sidebar.jsx";
+import Dashboard from "./components/Dashboard.jsx";
+import Upload from "./components/Upload.jsx";
+import ReviewQueue from "./components/ReviewQueue.jsx";
+import Invoices from "./components/Invoices.jsx";
+import Products from "./components/Products.jsx";
+import Analytics from "./components/Analytics.jsx";
+import ErrorToast from "./components/ErrorToast.jsx";
+import { cachedApi, configureAuth, reportError } from "./api.js";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
-
-function formatDt(dt) {
+function readResetTokenFromUrl() {
   try {
-    return new Date(dt).toLocaleString();
+    const params = new URLSearchParams(window.location.search);
+    return params.get("reset_token");
   } catch {
-    return dt;
+    return null;
   }
 }
 
 export default function App() {
-  const [file, setFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState(null);
-  const [error, setError] = useState("");
-
-  const [loadingQueue, setLoadingQueue] = useState(false);
-  const [queue, setQueue] = useState([]);
-  const [loadingApproved, setLoadingApproved] = useState(false);
-  const [approved, setApproved] = useState([]);
-
-  const [selected, setSelected] = useState(null);
-  const [approving, setApproving] = useState(false);
-
-  const [itemDesc, setItemDesc] = useState("");
-  const [itemQty, setItemQty] = useState(1);
-  const [itemAmount, setItemAmount] = useState(0);
-  const [itemConf, setItemConf] = useState(0.8);
-
-  const selectedRawText = useMemo(() => {
-    return selected?.extracted_data?.ocr?.raw_text || "";
-  }, [selected]);
-
-  async function fetchQueue() {
-    setLoadingQueue(true);
-    setError("");
-    try {
-      const res = await fetch(`${API_BASE}/submissions?status=pending_review`);
-      if (!res.ok) throw new Error(`Queue fetch failed (${res.status})`);
-      const data = await res.json();
-      setQueue(data);
-    } catch (e) {
-      setError(e.message || "Failed to load queue");
-    } finally {
-      setLoadingQueue(false);
-    }
-  }
-
-  async function fetchApproved() {
-    setLoadingApproved(true);
-    setError("");
-    try {
-      const res = await fetch(`${API_BASE}/submissions?status=approved`);
-      if (!res.ok) throw new Error(`Approved fetch failed (${res.status})`);
-      const data = await res.json();
-      setApproved(data);
-    } catch (e) {
-      setError(e.message || "Failed to load approved submissions");
-    } finally {
-      setLoadingApproved(false);
-    }
-  }
-
-  async function fetchSubmission(id) {
-    setError("");
-    try {
-      const res = await fetch(`${API_BASE}/submissions/${id}`);
-      if (!res.ok) throw new Error(`Fetch submission failed (${res.status})`);
-      const data = await res.json();
-      setSelected(data);
-
-      const maybeText = data?.extracted_data?.ocr?.raw_text || "";
-      if (maybeText && !itemDesc) setItemDesc(maybeText.slice(0, 80));
-    } catch (e) {
-      setError(e.message || "Failed to load submission");
-    }
-  }
-
-  async function handleUpload(e) {
-    e.preventDefault();
-    if (!file) {
-      setError("Choose a file first.");
-      return;
-    }
-
-    setUploading(true);
-    setError("");
-    setUploadResult(null);
-
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-
-      const res = await fetch(`${API_BASE}/submissions/upload`, {
-        method: "POST",
-        body: fd,
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Upload failed (${res.status}): ${text}`);
-      }
-
-      const data = await res.json();
-      setUploadResult(data);
-      await fetchQueue();
-    } catch (e) {
-      setError(e.message || "Upload failed");
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function handleApprove() {
-    if (!selected?.id) return;
-
-    setApproving(true);
-    setError("");
-    try {
-      const payload = {
-        items: [
-          {
-            description: itemDesc || "item",
-            quantity: Number(itemQty) || 1,
-            amount: Number(itemAmount) || 0,
-            confidence: Number(itemConf) || 0,
-          },
-        ],
-      };
-
-      const res = await fetch(
-        `${API_BASE}/submissions/${selected.id}/approve`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Approve failed (${res.status}): ${text}`);
-      }
-
-      setSelected(null);
-      setItemDesc("");
-      setItemQty(1);
-      setItemAmount(0);
-      setItemConf(0.8);
-
-      await fetchQueue();
-      await fetchApproved();
-    } catch (e) {
-      setError(e.message || "Approve failed");
-    } finally {
-      setApproving(false);
-    }
-  }
+  const { isAuthenticated, token, user, logout } = useAuth();
+  const [view, setView] = useState("dashboard");
+  const [pending, setPending] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [changePwOpen, setChangePwOpen] = useState(false);
+  const [resetToken, setResetToken] = useState(() => readResetTokenFromUrl());
 
   useEffect(() => {
-    fetchQueue();
-    fetchApproved();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    configureAuth(token, logout);
+    return () => configureAuth(null, null);
+  }, [token, logout]);
+
+  const loadPending = useCallback(() => {
+    if (!isAuthenticated) return;
+    cachedApi("/submissions?status=pending_review")
+      .then((d) => setPending(d.length))
+      .catch((e) => reportError(e, "pending count"));
+  }, [isAuthenticated]);
+
+  useEffect(() => { loadPending(); }, [refreshKey, loadPending]);
+
+  if (resetToken) {
+    return (
+      <>
+        <ResetPasswordView
+          token={resetToken}
+          onDone={() => setResetToken(null)}
+        />
+        <ErrorToast />
+      </>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <>
+        <Login />
+        <ErrorToast />
+      </>
+    );
+  }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <h1 className="brand__title">Invoice OCR — HITL</h1>
-          <p className="brand__subtitle">
-            Upload → OCR baseline → store as <strong>pending_review</strong> →
-            approve with corrected items.
-          </p>
-
-          <div className="pillrow">
-            <span className="pill">
-              <span className="pill__dot" />
-              OCR: baseline
-            </span>
-            <span className="pill">
-              <span className="pill__dot" />
-              Workflow: HITL
-            </span>
-            <span className="pill">
-              <span className="pill__dot" />
-              DB: Supabase Postgres
-            </span>
-          </div>
-        </div>
-
-        <div className="topbar__meta">
-          <div className="kpi">
-            <div className="kpi__card">
-              <p className="kpi__label">Queue</p>
-              <p className="kpi__value">{queue?.length || 0}</p>
-            </div>
-            <div className="kpi__card">
-              <p className="kpi__label">Selected</p>
-              <p className="kpi__value">{selected?.id ? "Yes" : "No"}</p>
-            </div>
-            <div className="kpi__card">
-              <p className="kpi__label">Approved</p>
-              <p className="kpi__value">{approved?.length || 0}</p>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {error ? (
-        <div className="alert alert--error" role="alert">
-          <strong>Error:</strong> {error}
-        </div>
-      ) : null}
-
-      <div className="layout">
-        <section className="card">
-          <h2 className="card__title">1) Upload Invoice</h2>
-
-          <form className="uploadForm" onSubmit={handleUpload}>
-            <div className="fileRow">
-              <input
-                type="file"
-                className="fileInput"
-                accept="image/jpeg,image/png,image/heic,image/heif"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                aria-label="Choose invoice image"
-              />
-              <button
-                type="submit"
-                className="btn btn--primary"
-                disabled={uploading}
-              >
-                {uploading ? "Uploading…" : "Upload"}
-              </button>
-            </div>
-          </form>
-
-          {uploadResult ? (
-            <div className="result">
-              <div className="result__row">
-                <span className="result__label">Submission ID</span>
-                <span>{uploadResult.id}</span>
-              </div>
-              <div className="result__row">
-                <span className="result__label">Status</span>
-                <span>{uploadResult.status}</span>
-              </div>
-              <div className="result__row">
-                <span className="result__label">Created</span>
-                <span>{formatDt(uploadResult.created_at)}</span>
-              </div>
-              <div className="ocrbox" title="OCR raw text">
-                {uploadResult?.extracted_data?.ocr?.raw_text || "(none)"}
-              </div>
-            </div>
-          ) : null}
-        </section>
-
-        <section className="card">
-          <h2 className="card__title">2) Pending Review Queue</h2>
-          <div className="queue-actions">
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={fetchQueue}
-              disabled={loadingQueue}
-            >
-              {loadingQueue ? "Refreshing…" : "Refresh"}
-            </button>
-          </div>
-
-          <div className="queue-list">
-            {queue?.length ? (
-              queue.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={`queue-item ${
-                    selected?.id === s.id ? "queue-item--selected" : ""
-                  }`}
-                  onClick={() => fetchSubmission(s.id)}
-                >
-                  <div className="queue-item__head">
-                    <span className="queue-item__id">{s.id}</span>
-                    <span className="queue-item__date">
-                      {formatDt(s.created_at)}
-                    </span>
-                  </div>
-                  <div className="queue-item__preview">
-                    {s?.extracted_data?.ocr?.raw_text
-                      ? s.extracted_data.ocr.raw_text.slice(0, 120) +
-                        (s.extracted_data.ocr.raw_text.length > 120 ? "…" : "")
-                      : "(no OCR yet)"}
-                  </div>
-                </button>
-              ))
-            ) : (
-              <div className="queue-empty">
-                {loadingQueue ? "Loading…" : "No pending submissions."}
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
-
-      <section className="review">
-        <h2 className="card__title">3) Review & Approve</h2>
-
-        {!selected ? (
-          <div className="review-placeholder">
-            Select a submission from the queue to review.
-          </div>
-        ) : (
-          <div className="reviewGrid">
-            <div>
-              <div className="meta">
-                <div className="metaRow">
-                  <span className="metaKey">Submission</span>
-                  <span>{selected.id}</span>
-                </div>
-                <div className="metaRow">
-                  <span className="metaKey">Status</span>
-                  <span>{selected.status}</span>
-                </div>
-                <div className="metaRow">
-                  <span className="metaKey">Created</span>
-                  <span>{formatDt(selected.created_at)}</span>
-                </div>
-              </div>
-              <div className="review-ocr-box">
-                <span className="review-ocr-box__label">OCR raw text</span>
-                <div className="review-ocr-box__content">
-                  {selectedRawText || "(none)"}
-                </div>
-              </div>
-            </div>
-
-            <div className="form">
-              <p className="approve-form__title">Approve (single line item)</p>
-              <div className="formGrid">
-                <div className="field">
-                  <label htmlFor="item-desc">Description</label>
-                  <input
-                    id="item-desc"
-                    value={itemDesc}
-                    onChange={(e) => setItemDesc(e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="item-qty">Quantity</label>
-                  <input
-                    id="item-qty"
-                    type="number"
-                    value={itemQty}
-                    onChange={(e) => setItemQty(e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="item-amount">Amount</label>
-                  <input
-                    id="item-amount"
-                    type="number"
-                    step="0.01"
-                    value={itemAmount}
-                    onChange={(e) => setItemAmount(e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="item-conf">Confidence (0–1)</label>
-                  <input
-                    id="item-conf"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="1"
-                    value={itemConf}
-                    onChange={(e) => setItemConf(e.target.value)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={handleApprove}
-                  disabled={approving}
-                >
-                  {approving ? "Approving…" : "Approve Submission"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section className="approved">
-        <h2 className="card__title">4) Approved Submissions</h2>
-        <div className="queue-actions">
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={fetchApproved}
-            disabled={loadingApproved}
-          >
-            {loadingApproved ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
-
-        <div className="queue-list">
-          {approved?.length ? (
-            approved.map((s) => (
-              <div key={s.id} className="queue-item approved-item">
-                <div className="queue-item__head">
-                  <span className="queue-item__id">{s.id}</span>
-                  <span className="queue-item__date">
-                    {formatDt(s.created_at)}
-                  </span>
-                </div>
-                <div className="queue-item__preview">
-                  {s?.extracted_data?.ocr?.raw_text
-                    ? s.extracted_data.ocr.raw_text.slice(0, 120) +
-                      (s.extracted_data.ocr.raw_text.length > 120 ? "…" : "")
-                    : "(no OCR yet)"}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="queue-empty">
-              {loadingApproved ? "Loading…" : "No approved submissions yet."}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <p className="footer">
-        Prototype note: HEIC is supported after adding server-side conversion
-        (pillow-heif). Current demo focuses on JPEG/PNG uploads.
-      </p>
+    <div className="app-layout">
+      <Sidebar
+        view={view}
+        setView={setView}
+        pending={pending}
+        user={user}
+        onSignOut={logout}
+        onChangePassword={() => setChangePwOpen(true)}
+      />
+      <main className="main-content">
+        {view === "dashboard" && <Dashboard setView={setView} />}
+        {view === "upload" && <Upload onUploaded={() => setRefreshKey((k) => k + 1)} />}
+        {view === "queue" && <ReviewQueue refresh={refreshKey} onRefresh={() => setRefreshKey((k) => k + 1)} />}
+        {view === "invoices" && <Invoices />}
+        {view === "products" && <Products />}
+        {view === "analytics" && <Analytics />}
+      </main>
+      {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
+      <ErrorToast />
     </div>
   );
 }

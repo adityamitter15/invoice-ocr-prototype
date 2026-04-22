@@ -1,13 +1,57 @@
+# Secrets
 .env
-node_modules/
-__pycache__/
-.DS_Store
-venv/
-*.zip
-startup.txt
 backend/.env
 frontend/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Databases
 backend/local.db
 backend/*.db
 backend/*.sqlite
 backend/*.sqlite3
+backend/local.db.bak
+
+# macOS / Editors
+.DS_Store
+.vscode/
+.idea/
+
+# LaTeX build artefacts
+*.aux
+*.toc
+*.lof
+*.lot
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+texput.log
+backend/FYP_Report.*
+
+# Fine-tuning runs + model cache
+backend/runs/
+backend/debug_cells/
+backend/debug_crops/
+
+# Archives
+*.zip
+startup.txt
+
+# Report directory - kept local, submitted separately as PDF
+report/
+CLAUDE.md
+.claude/
+
+# Dataset - too large for git, kept locally
+data/

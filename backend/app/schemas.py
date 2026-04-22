@@ -11,12 +11,32 @@ class SubmissionOut(BaseModel):
     created_at: datetime
 
 
-class InvoiceItemIn(BaseModel):
-    description: Optional[str]
-    quantity: Optional[int]
-    amount: Optional[float]
-    confidence: Optional[float]
+class InvoiceItemOut(BaseModel):
+    id: str
+    submission_id: Optional[str] = None
+    invoice_id: Optional[str] = None
+    description: Optional[str] = None
+    quantity: Optional[int] = None
+    unit_price: Optional[float] = None
+    amount: Optional[float] = None
+    confidence: Optional[float] = None
 
 
-class ApproveSubmissionIn(BaseModel):
-    items: List[InvoiceItemIn]
+class InvoiceOut(BaseModel):
+    id: str
+    submission_id: str
+    invoice_number: Optional[str] = None
+    invoice_date: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    net_total: Optional[float] = None
+    vat: Optional[float] = None
+    amount_due: Optional[float] = None
+    created_at: datetime
+    items: List[InvoiceItemOut] = []
+
+
+class ProductOut(BaseModel):
+    id: str
+    name: str
+    current_stock: int
