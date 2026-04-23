@@ -2,7 +2,7 @@
 """
 migrate_sqlite_to_supabase.py
 
-Copies all data from local SQLite (local.db) → Supabase PostgreSQL.
+Copies all data from local SQLite (local.db) -> Supabase PostgreSQL.
 Safe to re-run: uses ON CONFLICT DO NOTHING so existing rows are skipped.
 
 Usage:
@@ -46,7 +46,7 @@ def get_postgres():
 
 
 def migrate(dry_run: bool):
-    print(f"\n{'DRY RUN - ' if dry_run else ''}Migrating SQLite → Supabase\n{'='*50}")
+    print(f"\n{'DRY RUN - ' if dry_run else ''}Migrating SQLite -> Supabase\n{'='*50}")
 
     sqlite = get_sqlite()
     pg = get_postgres()
@@ -55,7 +55,7 @@ def migrate(dry_run: bool):
     counts = {"submissions": 0, "invoices": 0, "invoice_items": 0,
               "products": 0, "stock_movements": 0}
 
-    # ── Submissions ──────────────────────────────────────────────────────────
+    # Submissions
     rows = [dict(r) for r in sqlite.execute(
         "SELECT id, image_url, extracted_data, status, created_at FROM submissions"
     ).fetchall()]
@@ -73,7 +73,7 @@ def migrate(dry_run: bool):
             )
         counts["submissions"] += 1
 
-    # ── Invoices ─────────────────────────────────────────────────────────────
+    # Invoices
     rows = [dict(r) for r in sqlite.execute(
         "SELECT id, submission_id, invoice_number, invoice_date, customer_name, "
         "       customer_phone, net_total, vat, amount_due, created_at FROM invoices"
@@ -91,7 +91,7 @@ def migrate(dry_run: bool):
             )
         counts["invoices"] += 1
 
-    # ── Invoice items ────────────────────────────────────────────────────────
+    # Invoice items
     rows = [dict(r) for r in sqlite.execute(
         "SELECT id, submission_id, invoice_id, description, quantity, "
         "       unit_price, amount, confidence FROM invoice_items"
@@ -108,7 +108,7 @@ def migrate(dry_run: bool):
             )
         counts["invoice_items"] += 1
 
-    # ── Products ─────────────────────────────────────────────────────────────
+    # Products
     rows = [dict(r) for r in sqlite.execute(
         "SELECT id, name, current_stock FROM products"
     ).fetchall()]
@@ -122,7 +122,7 @@ def migrate(dry_run: bool):
             )
         counts["products"] += 1
 
-    # ── Stock movements ──────────────────────────────────────────────────────
+    # Stock movements
     rows = [dict(r) for r in sqlite.execute(
         "SELECT id, product_id, submission_id, quantity_change, created_at "
         "FROM stock_movements"
@@ -141,7 +141,7 @@ def migrate(dry_run: bool):
 
     if not dry_run:
         pg.commit()
-        print(f"\n✓ Migration complete.")
+        print(f"\nMigration complete.")
     else:
         print(f"\nDry run complete - nothing written.")
 

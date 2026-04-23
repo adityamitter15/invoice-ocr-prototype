@@ -1,7 +1,13 @@
+// Review queue page: the human-in-the-loop step. Left panel lists pending
+// submissions, right panel shows the extracted fields and lets the manager
+// edit, approve (which commits to the invoices / products / stock tables
+// via a single atomic transaction), or delete the submission.
+
 import { useState, useEffect, useCallback } from "react";
 import { api, cachedApi, invalidateCache, reportError } from "../api.js";
 import { Icon, icons, fmtCurrency } from "./shared.jsx";
 
+// Items with a TrOCR confidence below this are flagged in the table.
 const CONFIDENCE_THRESHOLD = 0.15;
 
 function EditInput({ value, onChange, mono, wide }) {
@@ -41,7 +47,7 @@ export default function ReviewQueue({ refresh, onRefresh }) {
 
   useEffect(() => {
     if (!detail) { setDraft(null); setEditing(false); return; }
-    setDraft(JSON.parse(JSON.stringify(detail.extracted_data?.structured || {})));
+    setDraft(structuredClone(detail.extracted_data?.structured || {}));
     setEditing(false);
   }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -197,7 +203,7 @@ export default function ReviewQueue({ refresh, onRefresh }) {
                   <div style={{ display: "flex", gap: 8 }}>
                     {editing ? (
                       <>
-                        <button className="btn btn-secondary" onClick={() => { setDraft(JSON.parse(JSON.stringify(detail.extracted_data?.structured || {}))); setEditing(false); }}>
+                        <button className="btn btn-secondary" onClick={() => { setDraft(structuredClone(detail.extracted_data?.structured || {})); setEditing(false); }}>
                           Cancel
                         </button>
                         <button className="btn btn-primary" onClick={handleSaveEdits} disabled={saving}>

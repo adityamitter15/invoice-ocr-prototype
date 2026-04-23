@@ -1,3 +1,7 @@
+// Authentication context: stores the JWT session in sessionStorage, exposes
+// login/logout, and provides the password-policy helpers used by the signup,
+// change-password and reset-password forms.
+
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { API } from "./api.js";
 
@@ -107,7 +111,8 @@ export function useAuth() {
   return ctx;
 }
 
-// Length gate is duplicated server-side in app/auth.py#evaluate_password_rules.
+// Password policy helpers. The same rule set runs server-side in
+// app/auth.py#evaluate_password_rules so the UI and the API stay in sync.
 const MIN_PASSWORD_LENGTH = 12;
 
 const COMMON_PASSWORDS = new Set([

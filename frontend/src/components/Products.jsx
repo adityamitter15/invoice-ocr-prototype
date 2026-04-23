@@ -1,3 +1,6 @@
+// Products page: stock level chart, low-stock warning, searchable product
+// list with delete action that cascades through the stock_movements table.
+
 import { useState, useEffect, useCallback } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -104,7 +107,7 @@ export default function Products() {
                     title="Delete product"
                     aria-label={`Delete ${p.name}`}
                   >
-                    {deletingId === p.id ? "…" : <Icon d={icons.trash} size={15} />}
+                    {deletingId === p.id ? "..." : <Icon d={icons.trash} size={15} />}
                   </button>
                 </td>
               </tr>

@@ -1,3 +1,6 @@
+// Invoices page: searchable table of every approved invoice with a click-to-
+// expand line-item view and a CSV export for accounting hand-off.
+
 import { useState, useEffect, Fragment } from "react";
 import { api, cachedApi, reportError } from "../api.js";
 import { Icon, icons, fmtCurrency } from "./shared.jsx";

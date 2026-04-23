@@ -1,3 +1,13 @@
+"""Database connection handling with Postgres -> SQLite fallback.
+
+On startup the module probes Supabase Postgres with a 5-second wall-clock
+timeout. If Postgres is reachable, every subsequent get_connection() opens
+a real Postgres connection. If not, every connection opens local.db instead.
+qmark() translates Postgres-flavoured SQL (%s placeholders, ::jsonb casts,
+FOR UPDATE) into SQLite dialect at runtime so route handlers write the
+query once.
+"""
+
 import logging
 import os
 import re
@@ -24,6 +34,8 @@ SQLITE_DB_PATH = BACKEND_ROOT / "local.db"
 SQLITE_SCHEMA_PATH = BACKEND_ROOT / "db" / "schema_sqlite.sql"
 SQLITE_SCHEMA_FALLBACK_PATH = REPO_ROOT / "db" / "schema_sqlite.sql"
 
+# Set on first successful probe or fallback; exposed via /health so operators
+# can see which backend is actually serving requests.
 ACTIVE_DB = {"engine": None, "mode": None, "detail": None}
 
 
@@ -57,6 +69,23 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
             conn.execute(alter)
         except sqlite3.OperationalError:
             pass
+
+    # Audit log was added later; ensure existing databases pick it up.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS audit_log (
+            id TEXT PRIMARY KEY NOT NULL DEFAULT (
+                lower(hex(randomblob(4))) || '-' ||
+                lower(hex(randomblob(2))) || '-' ||
+                lower(hex(randomblob(2))) || '-' ||
+                lower(hex(randomblob(2))) || '-' ||
+                lower(hex(randomblob(6)))
+            ),
+            user_id TEXT,
+            action TEXT NOT NULL,
+            subject_id TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"""
+    )
     conn.commit()
 
 
@@ -71,6 +100,7 @@ def _open_sqlite(db_path: Path, mode: str, detail: str) -> sqlite3.Connection:
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set. Ensure backend/.env exists and is correct.")
 
+# Startup probe: decide once which backend to use for the rest of the process.
 _USE_SQLITE: bool
 
 def _probe_postgres(url: str, timeout: float = 5.0) -> bool:
@@ -102,6 +132,7 @@ else:
     logger.warning("Supabase unreachable, using local SQLite")
 
 
+# Connection factory used by every route handler.
 def get_connection():
     if _USE_SQLITE:
         if DATABASE_URL.startswith("sqlite:///"):

@@ -1,3 +1,6 @@
+// Dashboard page: KPI cards, spend/invoice trend, processing status pie,
+// top products chart, model training status, and recent-activity tables.
+
 import { useState, useEffect } from "react";
 import {
   BarChart, Bar, Line, PieChart, Pie, Cell,

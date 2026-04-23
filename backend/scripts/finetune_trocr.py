@@ -38,9 +38,7 @@ from transformers import (
     TrainerCallback,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Config
-# ─────────────────────────────────────────────────────────────────────────────
 
 BASE_MODEL  = os.getenv("TROCR_HANDWRITTEN_MODEL", "microsoft/trocr-large-handwritten")
 DATA_ROOT   = Path(__file__).resolve().parents[2] / "data"
@@ -49,9 +47,8 @@ OUTPUT_DIR  = DATA_ROOT / "trocr-finetuned"
 TARGET_H    = 64
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Dataset
-# ─────────────────────────────────────────────────────────────────────────────
+# Dataset loading: reads every labelled crop pair from data/crops/ and wraps them
+# in a PyTorch Dataset that the HuggingFace Trainer can consume.
 
 def _load_pairs(crops_dir: Path, col_filter: str = None) -> List[Tuple[Path, str]]:
     """
@@ -99,7 +96,7 @@ class ReceiptCellDataset(Dataset):
         return len(self.pairs)
 
     def _augment(self, img: Image.Image) -> Image.Image:
-        """Small random transforms to make training more robust."""
+        """Random rotation, brightness and blur so the model sees varied handwriting."""
         import random
         from PIL import ImageEnhance, ImageFilter
 
@@ -152,9 +149,7 @@ class ReceiptCellDataset(Dataset):
         return {"pixel_values": pixel_values, "labels": labels}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Metrics
-# ─────────────────────────────────────────────────────────────────────────────
+# Metrics: Character Error Rate and word accuracy, computed during evaluation.
 
 def _cer(pred: str, ref: str) -> float:
     """Character Error Rate."""
@@ -199,11 +194,8 @@ def make_compute_metrics(processor):
     return compute_metrics
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Live-progress callback - writes training_stats.json after every epoch so the
-# web dashboard can show the loss curve updating in real time.
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Writes training_stats.json after every epoch so the web dashboard can
+# show the loss curve updating as training runs.
 class LiveStatsCallback(TrainerCallback):
     def __init__(self, output_dir: Path, meta: dict):
         self.output_dir = output_dir
@@ -221,9 +213,8 @@ class LiveStatsCallback(TrainerCallback):
             pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Training
-# ─────────────────────────────────────────────────────────────────────────────
+# Training entry point: wires up the model, dataset, training args and callbacks
+# then runs trainer.train() and writes the final checkpoint.
 
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune TrOCR on AGW receipt crops")
@@ -240,7 +231,7 @@ def main():
     crops_dir  = Path(args.crops_dir)  if args.crops_dir  else CROPS_DIR
     output_dir = Path(args.output_dir) if args.output_dir else OUTPUT_DIR
 
-    # ── Device detection ─────────────────────────────────────────────────────
+    # Pick the best available device: Apple MPS > CUDA > CPU.
     if torch.backends.mps.is_available():
         device = "mps"
         print("Using Apple MPS GPU acceleration")
@@ -251,7 +242,7 @@ def main():
         device = "cpu"
         print("No GPU found - training on CPU (will be slow)")
 
-    # ── Load model ───────────────────────────────────────────────────────────
+    # Load the base TrOCR model and configure the decoder for our use case.
     print(f"\nLoading base model: {BASE_MODEL}")
     processor = TrOCRProcessor.from_pretrained(BASE_MODEL)
     model     = VisionEncoderDecoderModel.from_pretrained(BASE_MODEL)
@@ -266,7 +257,7 @@ def main():
     model.config.length_penalty         = 2.0
     model.config.num_beams              = 4
 
-    # ── Load data ────────────────────────────────────────────────────────────
+    # Load labelled crops and split 85/15 for train/eval at the crop level.
     col_filter = None if args.col == "all" else args.col
     pairs = _load_pairs(crops_dir, col_filter=col_filter)
     if not pairs:
@@ -289,7 +280,7 @@ def main():
     print(f"Epochs: {args.epochs}  |  Batch: {args.batch_size}  |  LR: {args.lr}")
     print(f"Data augmentation: {'off' if args.no_augment else 'on (rotation, brightness, blur)'}")
 
-    # ── Training args ────────────────────────────────────────────────────────
+    # Training arguments: cosine LR schedule, epoch-level evaluation, keep best by CER.
     use_fp16 = (device == "cuda")
 
     training_args = Seq2SeqTrainingArguments(
@@ -333,12 +324,13 @@ def main():
         ],
     )
 
-    # ── Train ────────────────────────────────────────────────────────────────
-    print(f"\nStarting training → checkpoints saved to {output_dir}")
+    # Train. Callbacks write per-epoch stats for the dashboard and early-stop
+    # if validation CER stops improving.
+    print(f"\nStarting training. Checkpoints saved to {output_dir}")
     print("Watch CER (Character Error Rate) - lower is better. Target: < 0.10")
     train_result = trainer.train()
 
-    # ── Save final model ─────────────────────────────────────────────────────
+    # Save the best model and the final stats JSON for the dashboard.
     final_dir = output_dir / "final"
     model.save_pretrained(final_dir)
     processor.save_pretrained(final_dir)

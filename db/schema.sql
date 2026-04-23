@@ -1,9 +1,7 @@
 -- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- =========================
 -- Submissions (Invoices)
--- =========================
 CREATE TABLE IF NOT EXISTS submissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     image_url TEXT NOT NULL,
@@ -12,9 +10,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- =========================
 -- Normalized Invoice Records
--- =========================
 CREATE TABLE IF NOT EXISTS invoices (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     submission_id UUID NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
@@ -28,9 +24,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     created_at     TIMESTAMP DEFAULT NOW()
 );
 
--- =========================
 -- Invoice Line Items
--- =========================
 CREATE TABLE IF NOT EXISTS invoice_items (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     submission_id UUID NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
@@ -42,9 +36,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     confidence    NUMERIC(4,3)
 );
 
--- =========================
 -- Products (Inventory)
--- =========================
 CREATE TABLE IF NOT EXISTS products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
@@ -53,9 +45,7 @@ CREATE TABLE IF NOT EXISTS products (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_products_name ON products(name);
 
--- =========================
 -- Stock Movements (Audit)
--- =========================
 CREATE TABLE IF NOT EXISTS stock_movements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     product_id UUID REFERENCES products(id),
@@ -64,9 +54,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- =========================
 -- Users (Manager authentication)
--- =========================
 -- Passwords are stored only as bcrypt hashes (OWASP ASVS V2.4.1, NIST SP 800-63B
 -- section 5.1.1.2). The plaintext is never persisted or logged.
 CREATE TABLE IF NOT EXISTS users (
@@ -96,3 +84,17 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_reset_tokens_user ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_reset_tokens_expires ON password_reset_tokens(expires_at);
+
+-- Append-only audit log of state-changing manager actions (approvals,
+-- deletions). Rows are insert-only; the application never updates or
+-- deletes past entries so the table can serve as a forensic record.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id),
+    action TEXT NOT NULL,
+    subject_id TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);

@@ -1,3 +1,6 @@
+// Left navigation sidebar: page switcher, pending-review badge, signed-in
+// user chip with change-password and sign-out actions.
+
 import { Icon, icons } from "./shared.jsx";
 
 export default function Sidebar({ view, setView, pending, user, onSignOut, onChangePassword }) {

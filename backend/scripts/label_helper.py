@@ -64,8 +64,7 @@ def main():
     if args.invoice:
         all_txt = [t for t in all_txt if t.parent.name == args.invoice]
 
-    # Work from a flat list so we can go back with undo
-    # Include already-done ones too so undo can reach them
+    # Work from a flat list so undo can step backwards through finished items.
     all_txt_with_png = [t for t in all_txt if t.with_suffix(".png").exists()]
     todo_indices     = [i for i, t in enumerate(all_txt_with_png)
                         if str(t) not in done_set]

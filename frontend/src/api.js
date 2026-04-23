@@ -1,3 +1,6 @@
+// API helpers used by every component. Handles JWT injection, 401 sign-out,
+// consistent error reporting, and a small GET-only response cache.
+
 export const API = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 const SESSION_KEY = "agw.auth.session";

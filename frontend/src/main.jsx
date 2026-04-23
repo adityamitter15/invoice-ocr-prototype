@@ -1,3 +1,6 @@
+// Vite entry point. Mounts the app under <AuthProvider> so every component
+// can call useAuth() without having to re-thread the session through props.
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'

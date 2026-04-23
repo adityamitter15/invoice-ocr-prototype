@@ -58,7 +58,7 @@ def build_dataset(raw_dir: Path, crops_dir: Path, skip_existing: bool = False) -
         return
 
     print(f"Found {len(image_paths)} receipt images in {raw_dir}")
-    print("Loading TrOCR model (first call may download weights)…")
+    print("Loading TrOCR model (first call may download weights)...")
     processor, model = _load_handwritten()
     print("Model loaded.\n")
 
@@ -76,7 +76,7 @@ def build_dataset(raw_dir: Path, crops_dir: Path, skip_existing: bool = False) -
             continue
 
         out_dir.mkdir(parents=True, exist_ok=True)
-        print(f"[{img_idx:3d}/{len(image_paths)}] {invoice_id} …", end="", flush=True)
+        print(f"[{img_idx:3d}/{len(image_paths)}] {invoice_id} ...", end="", flush=True)
 
         pil_img = Image.open(img_path)
         pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
@@ -128,7 +128,7 @@ def build_dataset(raw_dir: Path, crops_dir: Path, skip_existing: bool = False) -
 
             row_entry = {"row": row_idx, "crops": []}
 
-            # ── Description crop ────────────────────────────────────────────
+            # Description crop
             desc_raw  = _crop_cell(cleaned_rgb, desc_x1 + 50, y_top, desc_x2, y_bot)
             desc_pre  = preprocess_cell_for_trocr(desc_raw)
             desc_in   = _resize_for_trocr(desc_pre)
@@ -140,7 +140,7 @@ def build_dataset(raw_dir: Path, crops_dir: Path, skip_existing: bool = False) -
             (out_dir / f"{stem}.txt").write_text(desc_pred, encoding="utf-8")
             row_entry["crops"].append({"col": "description", "pred": desc_pred})
 
-            # ── Amount crop (unit_price + amount combined) ───────────────────
+            # Amount crop (unit_price + amount combined)
             amt_raw  = _crop_cell(cleaned_rgb, up_x1, y_top, am_x2, y_bot)
             if _has_ink(amt_raw):
                 amt_pre  = preprocess_cell_for_trocr(amt_raw)

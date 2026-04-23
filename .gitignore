@@ -20,26 +20,17 @@ backend/local.db
 backend/*.db
 backend/*.sqlite
 backend/*.sqlite3
-backend/local.db.bak
 
 # macOS / Editors
 .DS_Store
 .vscode/
 .idea/
 
-# Fine-tuning runs + model cache
+# Fine-tuning runs
 backend/runs/
-backend/debug_cells/
-backend/debug_crops/
 
 # Archives
 *.zip
-startup.txt
-
-# Report directory - kept local, submitted separately as PDF
-report/
-CLAUDE.md
-.claude/
 
 # Dataset - too large for git, kept locally
 data/

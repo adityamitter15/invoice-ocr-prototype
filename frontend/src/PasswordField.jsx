@@ -1,3 +1,6 @@
+// Reusable password input. Drives the live policy checklist, strength meter,
+// show/hide toggle and the CapsLock-on hint across every password form.
+
 import { useCallback, useMemo, useState } from "react";
 import { evaluatePasswordRules, scorePassword } from "./auth.jsx";
 

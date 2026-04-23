@@ -1,3 +1,10 @@
+"""Pydantic response models used by the FastAPI endpoints.
+
+Each class defines the exact JSON shape returned for a given resource,
+which keeps the API contract in one place and lets FastAPI generate
+the OpenAPI schema automatically.
+"""
+
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from datetime import datetime

@@ -1,3 +1,6 @@
+// Sign-in page shown when no valid JWT is in sessionStorage. Includes the
+// link into the forgot-password modal and a CapsLock-on indicator.
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "./auth.jsx";
 import ForgotPasswordModal from "./ForgotPasswordModal.jsx";

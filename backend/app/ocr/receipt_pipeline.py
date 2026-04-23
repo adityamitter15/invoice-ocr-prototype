@@ -85,9 +85,7 @@ _DIGIT_SUBS = {
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Image helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# Image helpers: crop, grid removal, preprocessing and blank-row detection.
 
 def _crop_cell(
     pil_img: Image.Image,
@@ -170,10 +168,6 @@ def _has_ink(pil_img: Image.Image, dark_thresh: int = 180, min_ratio: float = 0.
     return (dark_pixels / gray.size) > min_ratio
 
 
-def _has_ink_simple(pil_img: Image.Image, dark_thresh: int = 180, min_ratio: float = 0.005) -> bool:
-    return _has_ink(pil_img, dark_thresh=dark_thresh, min_ratio=min_ratio)
-
-
 def _has_written_content(
     pil_img: Image.Image,
     *,
@@ -209,9 +203,8 @@ def _has_written_content(
     return tall >= min_tall_components and below_top >= 1
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# OCR helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# OCR helpers: TrOCR with and without confidence, Tesseract and EasyOCR wrappers,
+# and the amount-cell post-processor that handles column-overflow cases.
 
 def _trocr_cell(pil_img: Image.Image, processor, model, max_tokens: int = DEFAULT_MAX_TOKENS) -> str:
     preprocessed = preprocess_cell_for_trocr(pil_img)
@@ -291,9 +284,7 @@ def _parse_amount_easyocr(raw: str) -> str:
     return f"{all_digits}.00"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Public API
-# ─────────────────────────────────────────────────────────────────────────────
+# Public entry point called by the upload endpoint.
 
 def process_receipt(image_bytes: bytes) -> Dict[str, Any]:
     """Run the AGW OCR pipeline on one image and return the structured fields."""
@@ -407,7 +398,7 @@ def process_receipt(image_bytes: bytes) -> Dict[str, Any]:
             min(h, y_bot + row_pad),
         )
         qty_text = ""
-        if _has_ink_simple(qty_img):
+        if _has_ink(qty_img):
             qty_up = qty_img.resize(
                 (qty_img.width * 2, qty_img.height * 2), Image.LANCZOS,
             )
@@ -428,7 +419,7 @@ def process_receipt(image_bytes: bytes) -> Dict[str, Any]:
             min(h, y_bot + row_pad),
         )
         amount_text = ""
-        if _has_ink_simple(amount_img):
+        if _has_ink(amount_img):
             amount_up = amount_img.resize(
                 (amount_img.width * 2, amount_img.height * 2), Image.LANCZOS,
             )
@@ -494,7 +485,7 @@ def process_receipt(image_bytes: bytes) -> Dict[str, Any]:
         crop = cleaned_rgb.crop((fp_x1, fy1, fp_x2, fy2))
         if crop.size[0] == 0 or crop.size[1] == 0:
             return ""
-        if not _has_ink_simple(crop):
+        if not _has_ink(crop):
             return ""
         raw = _trocr_cell(crop, processor, model)
         groups = re.findall(r"\d+", raw)
@@ -551,8 +542,3 @@ def process_receipt(image_bytes: bytes) -> Dict[str, Any]:
         **footer_fields,
         "raw_text":    raw_text,
     }
-
-
-def process_receipt_to_text(image_bytes: bytes) -> str:
-    """Return just the raw_text string (legacy handwriting API)."""
-    return process_receipt(image_bytes).get("raw_text", "")

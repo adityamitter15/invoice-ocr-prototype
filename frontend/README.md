@@ -1,16 +1,46 @@
-# React + Vite
+# AGW Invoice OCR - Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React single-page application for the manager console. Built with Vite.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```bash
+npm install
+npm run dev
+```
 
-## React Compiler
+Opens on http://localhost:5173. The backend must be running on port 8000 (or
+the URL set in `VITE_API_BASE_URL` if overridden).
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Structure
 
-## Expanding the ESLint configuration
+```
+src/
+  main.jsx               Vite entry, wraps <App> in <AuthProvider>
+  App.jsx                Top-level router: login -> reset view -> main app
+  auth.jsx               JWT session context and password policy helpers
+  api.js                 Fetch wrapper, 401 handling, response cache
+  Login.jsx              Sign-in page
+  ForgotPasswordModal    Email-link and recovery-code reset tabs
+  ChangePasswordModal    In-session password change
+  ResetPasswordView      Landing page for the email reset link
+  PasswordField          Reusable password input + checklist + strength meter
+  components/
+    Sidebar              Left navigation
+    Dashboard            KPIs, charts, recent activity
+    Upload               Drag-and-drop OCR entry point
+    ReviewQueue          Human-in-the-loop correction + approval
+    Invoices             Searchable approved-invoice list with line items
+    Products             Inventory and stock movements
+    Analytics            OCR quality, fine-tuning status, BI charts
+    ErrorToast           Shared non-blocking error notifier
+    shared.jsx           Formatters, chart palette, SVG icon set
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Build
+
+```bash
+npm run build
+```
+
+Produces a static bundle in `dist/` that can be served by any static host.

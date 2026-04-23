@@ -100,9 +100,8 @@ def validate_password_policy(password: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Recovery codes
-# ─────────────────────────────────────────────────────────────────────────────
+# Recovery codes: a 16-character single-use code shown to the user once so they
+# can reset their password without access to the email inbox.
 
 _RECOVERY_ALPHABET = string.ascii_uppercase + string.digits
 _RECOVERY_LENGTH = 16
@@ -118,9 +117,8 @@ def normalise_recovery_code(code: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", (code or "").upper())
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Email reset tokens
-# ─────────────────────────────────────────────────────────────────────────────
+# Email reset tokens: high-entropy tokens emailed to the user via Resend.
+# Stored only as a SHA-256 hash in password_reset_tokens; short TTL.
 
 RESET_TOKEN_TTL_MINUTES = 15
 RESET_TOKEN_BYTES = 32

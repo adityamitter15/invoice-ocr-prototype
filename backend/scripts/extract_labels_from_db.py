@@ -120,14 +120,14 @@ def main():
                     continue
 
         if not crop_dir:
-            print(f"  [SKIP] submission {sub_id[:8]}… - no matching crop directory")
+            print(f"  [SKIP] submission {sub_id[:8]}... - no matching crop directory")
             total_notfound += 1
             continue
 
         # Match DB items to crop files by row order
         crop_txts = sorted(crop_dir.glob("row_*_description.txt"))
 
-        print(f"\n  Submission {sub_id[:8]}  →  {crop_dir.name}  "
+        print(f"\n  Submission {sub_id[:8]}  ->  {crop_dir.name}  "
               f"({len(db_items)} items, {len(crop_txts)} crops)")
 
         for i, db_item in enumerate(db_items):
@@ -143,7 +143,7 @@ def main():
                     total_skipped += 1
                     continue
 
-                print(f"    row {i+1:2d}:  {old_text!r}  →  {desc!r}")
+                print(f"    row {i+1:2d}:  {old_text!r}  ->  {desc!r}")
 
                 if not args.dry_run:
                     txt_path.write_text(desc, encoding="utf-8")

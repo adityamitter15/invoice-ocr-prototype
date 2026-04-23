@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-evaluate_pipeline.py
+Evaluate base and fine-tuned TrOCR against the stored crop labels.
 
-Runs both the base TrOCR model and the fine-tuned version against the
-corrected crop labels and computes CER (Character Error Rate) and word
-accuracy for each. Use --save-json to write the results to a file that
-the web dashboard can display.
+Scope note: the labels in data/crops/ are a mix of unrevised TrOCR
+predictions (saved by build_dataset.py on first pass) and HITL-corrected
+transcriptions (pulled back from approved invoices or edited via
+label_helper.py). This script measures agreement against those labels,
+so the reported numbers are honest only on the corrected subset.
+Chapter 7 of the report discusses the scoping explicitly.
 
 Usage:
     cd backend && source venv/bin/activate
@@ -161,9 +163,9 @@ def main():
 
     results = {}
 
-    # ── Base model ────────────────────────────────────────────────────────
+    # Base model
     if not args.skip_base:
-        print("\n[1/2] Evaluating BASE model (no fine-tuning)…")
+        print("\n[1/2] Evaluating BASE model (no fine-tuning)...")
         results["base"] = evaluate_model(base_model, pairs)
         r = results["base"]
         print(f"\n  Base model results:")
@@ -173,9 +175,9 @@ def main():
     else:
         print("\n[1/2] Skipping base model evaluation.")
 
-    # ── Fine-tuned model ──────────────────────────────────────────────────
+    # Fine-tuned model
     if finetuned.exists():
-        print(f"\n[2/2] Evaluating FINE-TUNED model ({finetuned})…")
+        print(f"\n[2/2] Evaluating FINE-TUNED model ({finetuned})...")
         results["finetuned"] = evaluate_model(str(finetuned), pairs)
         r = results["finetuned"]
         print(f"\n  Fine-tuned model results:")
@@ -186,7 +188,7 @@ def main():
         print(f"\n[2/2] Fine-tuned model not found at {finetuned}")
         print("Run finetune_trocr.py first.")
 
-    # ── Comparison ────────────────────────────────────────────────────────
+    # Comparison
     if "base" in results and "finetuned" in results:
         base_cer = results["base"]["mean_cer"]
         ft_cer   = results["finetuned"]["mean_cer"]

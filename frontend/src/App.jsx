@@ -1,3 +1,6 @@
+// Top-level application shell. Picks which view to render based on sign-in
+// state, a reset-token in the URL, or the sidebar nav selection.
+
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "./auth.jsx";
 import Login from "./Login.jsx";

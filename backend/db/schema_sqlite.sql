@@ -1,12 +1,10 @@
--- SQLite schema for local fallback (UUID + sensible defaults)
+-- SQLite schema for the local fallback database.
+-- The same four tables as db/schema.sql, but with the types and defaults that
+-- SQLite actually supports. UUIDs are built from randomblob() inline in each
+-- DEFAULT clause because SQLite does not allow CREATE FUNCTION, so the same
+-- generator expression is repeated per table.
 
 PRAGMA foreign_keys = ON;
-
--- uuid v4-ish string generator in pure SQLite
--- (not perfectly RFC4122, but unique enough for prototype)
--- format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
--- uses randomblob()
--- Note: SQLite doesn't have CREATE FUNCTION, so we inline this expression as DEFAULT.
 
 CREATE TABLE IF NOT EXISTS submissions (
   id TEXT PRIMARY KEY NOT NULL DEFAULT (
@@ -123,9 +121,27 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Append-only audit log; see db/schema.sql for the rationale.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (
+    lower(hex(randomblob(4))) || '-' ||
+    lower(hex(randomblob(2))) || '-' ||
+    lower(hex(randomblob(2))) || '-' ||
+    lower(hex(randomblob(2))) || '-' ||
+    lower(hex(randomblob(6)))
+  ),
+  user_id TEXT,
+  action TEXT NOT NULL,
+  subject_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_submission_id ON invoice_items(submission_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product_id ON stock_movements(product_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_reset_tokens_user ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_reset_tokens_expires ON password_reset_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);

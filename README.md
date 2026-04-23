@@ -40,7 +40,7 @@ Runs on <http://localhost:5173>. The login page appears first; seed credentials 
 
 ## Database
 
-The backend probes Supabase PostgreSQL on startup with a 5-second wall-clock timeout. If Postgres is unreachable it falls back to `backend/local.db` (SQLite) for the rest of the session. Same schema works on both — see `backend/db/schema_sqlite.sql` and `db/schema.sql`.
+The backend probes Supabase PostgreSQL on startup with a 5-second wall-clock timeout. If Postgres is unreachable it falls back to `backend/local.db` (SQLite) for the rest of the session. Same schema works on both - see `backend/db/schema_sqlite.sql` and `db/schema.sql`.
 
 To reset the local SQLite database:
 
@@ -57,14 +57,14 @@ cd backend
 python scripts/seed_manager.py   # prompts for username + password
 ```
 
-This prints a one-time 16-character recovery code. Write it down — it only appears once and is used to reset the password without email.
+This prints a one-time 16-character recovery code. Write it down - it only appears once and is used to reset the password without email.
 
 ## Demo flow
 
 1. Start the backend and frontend.
 2. Log in as the manager.
 3. Drag a JPEG of a handwritten invoice onto the Upload tab.
-4. Wait 15–25 seconds for the pipeline to run.
+4. Wait 15-25 seconds for the pipeline to run.
 5. Open the submission from the Review Queue.
 6. Correct any misread fields.
 7. Click Approve. The invoice lands in the Invoices tab and the products/stock tables are updated atomically.
@@ -92,22 +92,22 @@ Checkpoints land in `backend/runs/<timestamp>/`. The OCR pipeline picks up the n
 
 See `backend/.env.example`. Key ones:
 
-- `DATABASE_URL` — Postgres connection string for Supabase (optional; fallback to SQLite otherwise)
-- `JWT_SECRET` — 64-byte random string
-- `BCRYPT_COST` — defaults to 12
-- `RESEND_API_KEY` — for password reset emails (optional)
-- `ALLOWED_ORIGINS` — comma-separated CORS allowlist, defaults to the Vite dev URL
-- `VITE_API_BASE_URL` — frontend only, points at the backend base URL
+- `DATABASE_URL` - Postgres connection string for Supabase (optional; fallback to SQLite otherwise)
+- `JWT_SECRET` - 64-byte random string
+- `BCRYPT_COST` - defaults to 12
+- `RESEND_API_KEY` - for password reset emails (optional)
+- `ALLOWED_ORIGINS` - comma-separated CORS allowlist, defaults to the Vite dev URL
+- `VITE_API_BASE_URL` - frontend only, points at the backend base URL
 
 ## Troubleshooting
 
-**Backend fails with "Could not connect to Postgres"** — check `DATABASE_URL` or just leave it blank. The system will fall back to SQLite automatically.
+**Backend fails with "Could not connect to Postgres"** - check `DATABASE_URL` or just leave it blank. The system will fall back to SQLite automatically.
 
-**Upload returns 413** — the file is larger than 10 MB. Reduce resolution or crop.
+**Upload returns 413** - the file is larger than 10 MB. Reduce resolution or crop.
 
-**OCR takes 30+ seconds on the first invoice** — the TrOCR checkpoint is being downloaded from Hugging Face. Subsequent invoices run in 15–25 seconds on Apple M3.
+**OCR takes 30+ seconds on the first invoice** - the TrOCR checkpoint is being downloaded from Hugging Face. Subsequent invoices run in 15-25 seconds on Apple M3.
 
-**Reset link email never arrives** — set `RESEND_API_KEY` in `.env`, or use the printed recovery code instead.
+**Reset link email never arrives** - set `RESEND_API_KEY` in `.env`, or use the printed recovery code instead.
 
 ## Repository layout
 
@@ -119,9 +119,6 @@ backend/
   runs/              Fine-tuning checkpoints (gitignored)
 frontend/
   src/               React + Vite source
-report/
-  FYP_Report.tex     LaTeX source of the project report
-  diagrams/          Architecture, ERD, sequence, analytics charts
 data/                Invoice images + annotations (gitignored)
 ```
 

@@ -1,3 +1,6 @@
+// Forgot-password modal launched from the sign-in page. Has two tabs:
+// EmailPanel requests a reset link; CodePanel resets with a recovery code.
+
 import { useCallback, useState } from "react";
 import PasswordField from "./PasswordField.jsx";
 import { isPasswordAcceptable } from "./auth.jsx";

@@ -1,3 +1,7 @@
+// Upload page: drag-and-drop or browse an invoice image, POST it to the
+// /submissions/upload endpoint, then show the structured extraction result
+// with a header-completeness score before the user visits the review queue.
+
 import { useState, useRef } from "react";
 import { api, invalidateCache, reportError } from "../api.js";
 import { Icon, icons, CHART, fmtCurrency } from "./shared.jsx";

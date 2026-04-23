@@ -1,3 +1,7 @@
+// Full-page view shown when the user opens the reset link from their email.
+// The token from the URL is exchanged for a password change; the URL token
+// is dropped from the address bar as soon as the page loads.
+
 import { useCallback, useState } from "react";
 import PasswordField from "./PasswordField.jsx";
 import { isPasswordAcceptable } from "./auth.jsx";

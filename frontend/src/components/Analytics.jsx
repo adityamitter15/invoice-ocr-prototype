@@ -1,3 +1,8 @@
+// Analytics page: OCR performance (extraction score distribution, engine
+// stack, per-submission quality table), model fine-tuning status (dataset
+// progress, base-vs-fine-tuned CER, live training-loss curve), and
+// business-intelligence views (spend forecast, product frequency).
+
 import { useState, useEffect, useCallback } from "react";
 import {
   BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,

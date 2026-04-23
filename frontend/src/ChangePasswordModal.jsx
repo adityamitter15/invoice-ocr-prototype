@@ -1,3 +1,6 @@
+// Change-password modal opened from the sidebar by a signed-in user.
+// On success it shows the freshly issued recovery code (one-time display).
+
 import { useCallback, useState } from "react";
 import PasswordField from "./PasswordField.jsx";
 import { isPasswordAcceptable, useAuth } from "./auth.jsx";

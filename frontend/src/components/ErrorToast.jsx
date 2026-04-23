@@ -1,3 +1,6 @@
+// Toast stack for surface errors from any component. api.js pushes entries
+// through configureErrorReporter; each toast auto-dismisses after 5 seconds.
+
 import { useEffect, useRef, useState } from "react";
 import { configureErrorReporter } from "../api.js";
 

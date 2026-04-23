@@ -1,9 +1,17 @@
+"""FastAPI application for the AGW invoice OCR system.
+
+Exposes the REST endpoints consumed by the React frontend: authentication
+and password recovery, submission CRUD and approval, invoice and product
+reads, analytics, and the image upload that runs the OCR pipeline.
+"""
+
 import io
 import json
 import logging
 import os
 import time
 import uuid
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,6 +21,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.schemas import InvoiceOut, ProductOut, SubmissionOut
 from app.database import ACTIVE_DB, get_connection, is_sqlite_conn, qmark
@@ -39,9 +48,51 @@ from app.auth import (
 from app.email import render_reset_email, send_email
 
 
+# Each request gets a short id that is attached to every log line produced
+# while handling it, so a single request can be followed across the log.
+_request_id_ctx: ContextVar[str] = ContextVar("request_id", default="-")
+
+
+class _RequestIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = _request_id_ctx.get()
+        return True
+
+
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s: %(message)s"
+))
+_log_handler.addFilter(_RequestIdFilter())
+logging.basicConfig(level=logging.INFO, handlers=[_log_handler], force=True)
+
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Invoice OCR Prototype API")
+_STARTED_AT = datetime.now(timezone.utc)
+
+app = FastAPI(
+    title="AGW Invoice OCR API",
+    description="Multi-engine OCR with human-in-the-loop review for handwritten invoices.",
+    version="1.0.0",
+)
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Attach a short id to every request so log lines from the same request
+    can be grouped together."""
+
+    async def dispatch(self, request, call_next):
+        rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        token = _request_id_ctx.set(rid)
+        try:
+            response = await call_next(request)
+            response.headers["x-request-id"] = rid
+            return response
+        finally:
+            _request_id_ctx.reset(token)
+
+
+app.add_middleware(RequestIdMiddleware)
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv(
     "ALLOWED_ORIGINS",
@@ -74,6 +125,20 @@ class SubmissionCreate(BaseModel):
     extracted_data: Optional[Dict[str, Any]] = Field(default=None)
 
 
+def _log_audit(cur, conn, user_id: Optional[str], action: str, subject_id: Optional[str]) -> None:
+    """Insert one audit_log row for a state-changing manager action."""
+    if is_sqlite_conn(conn):
+        cur.execute(
+            "INSERT INTO audit_log (id, user_id, action, subject_id) VALUES (?, ?, ?, ?)",
+            (str(uuid.uuid4()), user_id, action, subject_id),
+        )
+    else:
+        cur.execute(
+            "INSERT INTO audit_log (user_id, action, subject_id) VALUES (%s, %s, %s)",
+            (user_id, action, subject_id),
+        )
+
+
 def normalize_submission(row: Dict[str, Any]) -> Dict[str, Any]:
     if row is None:
         return row
@@ -104,14 +169,38 @@ def _to_int(val) -> Optional[int]:
         return None
 
 
-@app.get("/health")
+@app.on_event("startup")
+def _warmup_ocr_models() -> None:
+    """Load the TrOCR weights once at startup so the first upload does not
+    have to wait for the model to load."""
+    if os.getenv("SKIP_OCR_WARMUP") == "1":
+        return
+    try:
+        from app.ocr.handwriting import _load_handwritten
+        _load_handwritten()
+        logger.info("TrOCR handwritten model pre-loaded at startup")
+    except Exception:
+        logger.exception("OCR warmup failed. Uploads will load the model on first use.")
+
+
+@app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "db": ACTIVE_DB}
+    """Report the liveness of the API and which database is serving requests."""
+    uptime_seconds = int((datetime.now(timezone.utc) - _STARTED_AT).total_seconds())
+    try:
+        from app.ocr.handwriting import _hw_model
+        model_loaded = _hw_model is not None
+    except Exception:
+        model_loaded = False
+    return {
+        "status": "ok",
+        "db": ACTIVE_DB,
+        "uptime_seconds": uptime_seconds,
+        "ocr_model_loaded": model_loaded,
+    }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Authentication
-# ─────────────────────────────────────────────────────────────────────────────
+# Authentication: login, whoami, password change, recovery-code reset.
 
 class LoginPayload(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
@@ -126,7 +215,7 @@ class LoginResponse(BaseModel):
     user: Dict[str, Any]
 
 
-@app.post("/auth/login", response_model=LoginResponse)
+@app.post("/auth/login", response_model=LoginResponse, tags=["Auth"])
 def login(payload: LoginPayload, request: Request):
     client_key = client_key_from_request(request)
 
@@ -163,7 +252,7 @@ def login(payload: LoginPayload, request: Request):
     )
 
 
-@app.get("/auth/me")
+@app.get("/auth/me", tags=["Auth"])
 def whoami(current=Depends(require_manager)):
     user = lookup_user_by_id(current["sub"])
     if not user:
@@ -177,7 +266,7 @@ def whoami(current=Depends(require_manager)):
     }
 
 
-@app.get("/auth/status")
+@app.get("/auth/status", tags=["Auth"])
 def auth_status():
     """Advertise whether a manager exists so the UI can steer onboarding vs
     sign-in. Deliberately exposes no usernames or timestamps."""
@@ -192,7 +281,7 @@ def auth_status():
         conn.close()
 
 
-@app.get("/auth/password-rules")
+@app.get("/auth/password-rules", tags=["Auth"])
 def password_rules():
     """Echo the policy checklist so UI and server share one source of truth."""
     return {"rules": evaluate_password_rules("")}
@@ -203,7 +292,7 @@ class ChangePasswordPayload(BaseModel):
     new_password: str = Field(..., min_length=1, max_length=128)
 
 
-@app.post("/auth/change-password")
+@app.post("/auth/change-password", tags=["Auth"])
 def change_password(payload: ChangePasswordPayload, current=Depends(require_manager)):
     user = lookup_user(None, user_id=current["sub"])
     if not user:
@@ -248,7 +337,7 @@ class ForgotPasswordPayload(BaseModel):
     new_password: str = Field(..., min_length=1, max_length=128)
 
 
-@app.post("/auth/forgot-password")
+@app.post("/auth/forgot-password", tags=["Auth"])
 def forgot_password(payload: ForgotPasswordPayload, request: Request):
     client_key = client_key_from_request(request)
     if is_locked_out(client_key):
@@ -319,9 +408,8 @@ def lookup_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Email-based password reset (Resend delivery)
-# ─────────────────────────────────────────────────────────────────────────────
+# Email-based password reset flow: issue a single-use token, email the link,
+# exchange the token for a new password.
 
 class RequestResetPayload(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
@@ -359,6 +447,14 @@ def _persist_reset_token(user_id: str, token: str) -> None:
     try:
         cur = conn.cursor()
         _invalidate_outstanding_reset_tokens(cur, conn, user_id)
+        # Clean up any expired rows as part of the same transaction so the
+        # table does not grow forever.
+        if is_sqlite_conn(conn):
+            cur.execute(
+                "DELETE FROM password_reset_tokens WHERE expires_at < datetime('now')"
+            )
+        else:
+            cur.execute("DELETE FROM password_reset_tokens WHERE expires_at < NOW()")
         # SQLite stores datetimes as text in the project's existing format.
         expires_value = (
             expires.strftime("%Y-%m-%d %H:%M:%S")
@@ -379,7 +475,7 @@ def _persist_reset_token(user_id: str, token: str) -> None:
         conn.close()
 
 
-@app.post("/auth/request-reset")
+@app.post("/auth/request-reset", tags=["Auth"])
 def request_password_reset(payload: RequestResetPayload, request: Request):
     """Start the email reset flow. Always returns a generic acknowledgement
     to prevent username enumeration."""
@@ -421,7 +517,7 @@ def request_password_reset(payload: RequestResetPayload, request: Request):
     }
 
 
-@app.post("/auth/reset-password")
+@app.post("/auth/reset-password", tags=["Auth"])
 def reset_password(payload: ResetPasswordPayload, request: Request):
     """Exchange a valid reset token for a password change."""
     client_key = client_key_from_request(request)
@@ -490,11 +586,9 @@ def reset_password(payload: ResetPasswordPayload, request: Request):
     return {"status": "password_reset", "recovery_code": recovery_code}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Submission endpoints (review queue)
-# ─────────────────────────────────────────────────────────────────────────────
+# Submission endpoints: create, list, update, delete rows in the review queue.
 
-@app.post("/submissions")
+@app.post("/submissions", tags=["Submissions"])
 def create_submission(payload: SubmissionCreate, _user=Depends(require_manager)):
     conn = get_connection()
     try:
@@ -524,13 +618,17 @@ def create_submission(payload: SubmissionCreate, _user=Depends(require_manager))
         conn.commit()
         cur.close()
         return normalize_submission(dict(row)) if isinstance(row, dict) else row
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database insert failed: {str(e)}")
+    except psycopg2.Error:
+        logger.exception("Submission insert failed")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error creating submission")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.get("/submissions/{submission_id}")
+@app.get("/submissions/{submission_id}", tags=["Submissions"])
 def get_submission(submission_id: str, _user=Depends(require_manager)):
     conn = get_connection()
     try:
@@ -550,13 +648,17 @@ def get_submission(submission_id: str, _user=Depends(require_manager)):
         return normalize_submission(dict(row)) if isinstance(row, dict) else row
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+    except psycopg2.Error:
+        logger.exception("Submission read failed")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error reading submission")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.get("/submissions", response_model=List[SubmissionOut])
+@app.get("/submissions", response_model=List[SubmissionOut], tags=["Submissions"])
 def list_submissions(status: str = "pending_review", _user=Depends(require_manager)):
     last_err: Optional[Exception] = None
     for attempt in range(3):
@@ -578,21 +680,23 @@ def list_submissions(status: str = "pending_review", _user=Depends(require_manag
         except psycopg2.OperationalError as e:
             last_err = e
             time.sleep(0.5 * (attempt + 1))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"List failed: {str(e)}")
+        except Exception:
+            logger.exception("Unexpected error listing submissions")
+            raise HTTPException(status_code=500, detail="Internal server error")
         finally:
             if conn is not None:
                 try:
                     conn.close()
                 except Exception:
                     pass
+    logger.error("Database unreachable after 3 attempts: %s", last_err)
     raise HTTPException(
         status_code=503,
-        detail=f"Database temporarily unreachable. Last error: {str(last_err)}",
+        detail="Database temporarily unreachable. Please retry in a moment.",
     )
 
 
-@app.patch("/submissions/{submission_id}")
+@app.patch("/submissions/{submission_id}", tags=["Submissions"])
 def update_submission(submission_id: str, payload: Dict[str, Any], _user=Depends(require_manager)):
     """Apply reviewer corrections to a pending submission."""
     conn = get_connection()
@@ -625,14 +729,18 @@ def update_submission(submission_id: str, payload: Dict[str, Any], _user=Depends
         return {"updated": submission_id}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.delete("/submissions/{submission_id}")
-def delete_submission(submission_id: str, _user=Depends(require_manager)):
+@app.delete("/submissions/{submission_id}", tags=["Submissions"])
+def delete_submission(submission_id: str, current=Depends(require_manager)):
     """Remove a pending submission from the review queue."""
     conn = get_connection()
     try:
@@ -654,20 +762,24 @@ def delete_submission(submission_id: str, _user=Depends(require_manager)):
             qmark("DELETE FROM submissions WHERE id = %s", conn),
             (submission_id,),
         )
+        _log_audit(cur, conn, current.get("sub"), "submission.deleted", submission_id)
         conn.commit()
         cur.close()
         return {"deleted": submission_id}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Approval pipeline
-# ─────────────────────────────────────────────────────────────────────────────
+# Approval pipeline: materialise a reviewed submission into the real
+# invoice / line-item / product / stock-movement tables atomically.
 
 def _insert_invoice_header(cur, conn, submission_id: str, structured: Dict[str, Any]) -> str:
     """Create the invoice row and return its id."""
@@ -708,7 +820,13 @@ def _insert_invoice_header(cur, conn, submission_id: str, structured: Dict[str, 
 
 
 def _upsert_product(cur, conn, name: str) -> str:
-    """Insert a product by name and return its id, using the dialect's upsert."""
+    """Insert a product by name and return its id using an atomic upsert.
+
+    On Postgres the ON CONFLICT RETURNING handles the race in a single
+    statement. On SQLite the INSERT OR IGNORE plus SELECT runs inside the
+    transaction started by approve_submission, which already holds the
+    write lock, so no other connection can slip in between the two.
+    """
     if is_sqlite_conn(conn):
         product_id = str(uuid.uuid4())
         cur.execute(
@@ -801,8 +919,8 @@ def _record_stock_movement(
         )
 
 
-@app.post("/submissions/{submission_id}/approve")
-def approve_submission(submission_id: str, _user=Depends(require_manager)):
+@app.post("/submissions/{submission_id}/approve", tags=["Submissions"])
+def approve_submission(submission_id: str, current=Depends(require_manager)):
     """Approve a reviewed submission and materialise it into the invoice DB."""
     conn = get_connection()
     cur = conn.cursor()
@@ -856,33 +974,67 @@ def approve_submission(submission_id: str, _user=Depends(require_manager)):
             (submission_id,),
         )
 
+        _log_audit(cur, conn, current.get("sub"), "submission.approved", submission_id)
+
         conn.commit()
         return {"status": "approved", "submission_id": submission_id, "invoice_id": invoice_id}
 
     except HTTPException:
         conn.rollback()
         raise
-    except Exception as e:
+    except psycopg2.Error:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Approval transaction failed")
+        raise HTTPException(status_code=500, detail="Database error during approval")
+    except Exception:
+        conn.rollback()
+        logger.exception("Unexpected error during approval")
+        raise HTTPException(status_code=500, detail="Internal server error during approval")
     finally:
         cur.close()
         conn.close()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Invoice database endpoints
-# ─────────────────────────────────────────────────────────────────────────────
+# Invoice and product read endpoints for the dashboard pages.
 
-@app.get("/invoices", response_model=List[InvoiceOut])
-def list_invoices(_user=Depends(require_manager)):
+# Allow-list of sortable columns so a bad ?sort= value cannot turn into
+# SQL injection even though the column is interpolated into the statement.
+_INVOICE_SORT_COLUMNS = {"created_at", "invoice_date", "amount_due", "invoice_number"}
+
+
+@app.get("/invoices", response_model=List[InvoiceOut], tags=["Invoices"])
+def list_invoices(
+    limit: int = 100,
+    offset: int = 0,
+    sort: str = "-created_at",
+    _user=Depends(require_manager),
+):
+    # Clamp to sensible bounds so a malformed request cannot exhaust memory.
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+
+    direction = "DESC"
+    column = sort
+    if sort.startswith("-"):
+        column = sort[1:]
+    elif sort.startswith("+"):
+        column = sort[1:]
+        direction = "ASC"
+    if column not in _INVOICE_SORT_COLUMNS:
+        column = "created_at"
+        direction = "DESC"
+
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, submission_id, invoice_number, invoice_date, "
-            "       customer_name, customer_phone, net_total, vat, amount_due, created_at "
-            "FROM invoices ORDER BY created_at DESC"
+            qmark(
+                "SELECT id, submission_id, invoice_number, invoice_date, "
+                "       customer_name, customer_phone, net_total, vat, amount_due, created_at "
+                f"FROM invoices ORDER BY {column} {direction} LIMIT %s OFFSET %s",
+                conn,
+            ),
+            (limit, offset),
         )
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -891,13 +1043,17 @@ def list_invoices(_user=Depends(require_manager)):
             r["submission_id"] = str(r["submission_id"])
             r["items"] = []
         return rows
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.get("/invoices/{invoice_id}", response_model=InvoiceOut)
+@app.get("/invoices/{invoice_id}", response_model=InvoiceOut, tags=["Invoices"])
 def get_invoice(invoice_id: str, _user=Depends(require_manager)):
     conn = get_connection()
     try:
@@ -937,14 +1093,18 @@ def get_invoice(invoice_id: str, _user=Depends(require_manager)):
         return inv
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.delete("/products/{product_id}")
-def delete_product(product_id: str, _user=Depends(require_manager)):
+@app.delete("/products/{product_id}", tags=["Products"])
+def delete_product(product_id: str, current=Depends(require_manager)):
     """Delete a product and its associated stock movements."""
     conn = get_connection()
     try:
@@ -965,39 +1125,105 @@ def delete_product(product_id: str, _user=Depends(require_manager)):
             qmark("DELETE FROM products WHERE id = %s", conn),
             (product_id,),
         )
+        _log_audit(cur, conn, current.get("sub"), "product.deleted", product_id)
         conn.commit()
         cur.close()
         return {"deleted": product_id}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.get("/products", response_model=List[ProductOut])
-def list_products(_user=Depends(require_manager)):
+@app.get("/invoices/count", tags=["Invoices"])
+def count_invoices(_user=Depends(require_manager)):
+    """Return the total count of approved invoices, used alongside /invoices
+    paging on the dashboard."""
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, current_stock FROM products ORDER BY name")
+        cur.execute("SELECT COUNT(*) AS c FROM invoices")
+        total = dict(cur.fetchone())["c"]
+        cur.close()
+        return {"total": total}
+    finally:
+        conn.close()
+
+
+@app.get("/audit-log", tags=["System"])
+def list_audit_log(
+    limit: int = 100,
+    offset: int = 0,
+    _user=Depends(require_manager),
+):
+    """List audit-log entries newest first. Manager-only."""
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            qmark(
+                "SELECT id, user_id, action, subject_id, created_at "
+                "FROM audit_log ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                conn,
+            ),
+            (limit, offset),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        for r in rows:
+            r["id"] = str(r["id"])
+            if r.get("user_id"):
+                r["user_id"] = str(r["user_id"])
+        return rows
+    finally:
+        conn.close()
+
+
+@app.get("/products", response_model=List[ProductOut], tags=["Products"])
+def list_products(
+    limit: int = 200,
+    offset: int = 0,
+    _user=Depends(require_manager),
+):
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            qmark(
+                "SELECT id, name, current_stock FROM products "
+                "ORDER BY name LIMIT %s OFFSET %s",
+                conn,
+            ),
+            (limit, offset),
+        )
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
         for r in rows:
             r["id"] = str(r["id"])
         return rows
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Analytics endpoints
-# ─────────────────────────────────────────────────────────────────────────────
+# Analytics endpoints: feed the charts and KPIs on the dashboard page.
 
-@app.get("/analytics/summary")
+@app.get("/analytics/summary", tags=["Analytics"])
 def analytics_summary(_user=Depends(require_manager)):
     conn = get_connection()
     try:
@@ -1039,13 +1265,17 @@ def analytics_summary(_user=Depends(require_manager)):
             "pending_submissions": pending,
             "total_processed": total_processed,
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.get("/analytics/monthly-spend")
+@app.get("/analytics/monthly-spend", tags=["Analytics"])
 def analytics_monthly_spend(_user=Depends(require_manager)):
     conn = get_connection()
     try:
@@ -1070,13 +1300,17 @@ def analytics_monthly_spend(_user=Depends(require_manager)):
         for r in rows:
             r["total_spend"] = float(r["total_spend"] or 0)
         return rows
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.get("/analytics/top-products")
+@app.get("/analytics/top-products", tags=["Analytics"])
 def analytics_top_products(_user=Depends(require_manager)):
     conn = get_connection()
     try:
@@ -1098,13 +1332,17 @@ def analytics_top_products(_user=Depends(require_manager)):
             r["total_spend"] = float(r["total_spend"] or 0)
             r["avg_price"] = round(float(r["avg_price"] or 0), 2)
         return rows
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.get("/analytics/stock-forecast")
+@app.get("/analytics/stock-forecast", tags=["Analytics"])
 def analytics_stock_forecast(_user=Depends(require_manager)):
     conn = get_connection()
     try:
@@ -1131,13 +1369,17 @@ def analytics_stock_forecast(_user=Depends(require_manager)):
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
         return rows
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-@app.get("/analytics/model-performance")
+@app.get("/analytics/model-performance", tags=["Analytics"])
 def analytics_model_performance(_user=Depends(require_manager)):
     """Training stats and evaluation results for the TrOCR fine-tuning pipeline."""
     data_root = Path(__file__).resolve().parents[2] / "data"
@@ -1187,7 +1429,7 @@ def analytics_model_performance(_user=Depends(require_manager)):
     return result
 
 
-@app.get("/analytics/ocr-confidence")
+@app.get("/analytics/ocr-confidence", tags=["Analytics"])
 def analytics_ocr_confidence(_user=Depends(require_manager)):
     conn = get_connection()
     try:
@@ -1235,18 +1477,32 @@ def analytics_ocr_confidence(_user=Depends(require_manager)):
                 "extraction_score": score,
             })
         return metrics
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except psycopg2.Error:
+        logger.exception("Database error")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Upload endpoint
-# ─────────────────────────────────────────────────────────────────────────────
+# Upload endpoint: receive an image, run the OCR pipeline,
+# write a pending_review submission row.
+
+# PIL reads the first few bytes of the file to detect the actual format.
+# Comparing it against the client-declared content-type catches uploads
+# that have been renamed to look like an image but are not one.
+_PIL_FORMAT_TO_MIME = {
+    "JPEG": {"image/jpeg"},
+    "PNG": {"image/png"},
+    "HEIF": {"image/heic", "image/heif"},
+    "HEIC": {"image/heic", "image/heif"},
+}
+
 
 def _validate_upload(file: UploadFile, image_bytes: bytes) -> None:
-    """Enforce size, declared content-type and magic-byte checks."""
+    """Enforce size, declared content-type, and header/magic-byte checks."""
     if len(image_bytes) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10 MB)")
 
@@ -1259,12 +1515,21 @@ def _validate_upload(file: UploadFile, image_bytes: bytes) -> None:
 
     try:
         probe = Image.open(io.BytesIO(image_bytes))
+        detected_format = (probe.format or "").upper()
         probe.verify()
     except (UnidentifiedImageError, OSError, ValueError):
         raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
 
+    expected_mimes = _PIL_FORMAT_TO_MIME.get(detected_format)
+    if expected_mimes and declared not in expected_mimes:
+        # Client says one thing, file bytes say another. Reject it.
+        raise HTTPException(
+            status_code=415,
+            detail="File content does not match the declared type",
+        )
 
-@app.post("/submissions/upload", response_model=SubmissionOut)
+
+@app.post("/submissions/upload", response_model=SubmissionOut, tags=["Submissions"])
 async def upload_submission(file: UploadFile = File(...), _user=Depends(require_manager)):
     """Upload an invoice image, run OCR, store as pending_review."""
     from app.ocr.receipt_pipeline import process_receipt
@@ -1274,9 +1539,9 @@ async def upload_submission(file: UploadFile = File(...), _user=Depends(require_
 
     try:
         structured = process_receipt(image_bytes)
-    except Exception as e:
+    except Exception:
         logger.exception("OCR pipeline failed")
-        raise HTTPException(status_code=500, detail=f"OCR pipeline failed: {e}")
+        raise HTTPException(status_code=500, detail="OCR pipeline failed")
 
     raw_text = structured.get("raw_text", "")
     extracted_data = {
@@ -1319,7 +1584,11 @@ async def upload_submission(file: UploadFile = File(...), _user=Depends(require_
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+    except psycopg2.Error:
+        logger.exception("Upload database insert failed")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception:
+        logger.exception("Unexpected error saving upload")
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()

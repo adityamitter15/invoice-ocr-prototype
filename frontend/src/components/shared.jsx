@@ -1,3 +1,7 @@
+// Shared helpers and design tokens used across the dashboard components:
+// currency/date formatters, chart colour palette, and the inline SVG icon
+// set so the app does not pull in an icon font library.
+
 export const fmtCurrency = (v) => {
   const n = parseFloat(v);
   return isNaN(n) ? "-" : `\u00A3${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
