@@ -54,7 +54,7 @@ supabase_functions==0.10.1
 sympy==1.14.0
 tokenizers==0.22.2
 torch==2.8.0
-torchaudio==2.8.0
+torchaudio==2.11.0
 torchvision==0.23.0
 tqdm==4.67.2
 transformers==4.57.6
